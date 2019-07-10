@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=utf-8">
+    <title></title>
+    <style>
+    * {
+        color: #444444;
+    }
+
+    pre {
+      white-space: pre-wrap;       /* Since CSS 2.1 */
+      white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+      white-space: -pre-wrap;      /* Opera 4-6 */
+      white-space: -o-pre-wrap;    /* Opera 7 */
+      word-wrap: break-word;       /* Internet Explorer 5.5+ */
+      border: solid 2px #888888;
+      padding: 1rem;
+    }
+
+    #drop_zone {
+      width: calc(100% - 6rem);
+      margin: 2rem;
+      padding: 1rem;
+      height: 4rem;
+      line-height: 4rem;
+      border: dashed 2px #888888;
+    }
+
+    .item {
+        border: solid 2px #888888;
+        padding: .5rem;
+        margin-bottom: 1rem;
+    }
+
+    </style>
+  </head>
+  <body>
+    <div id="options">
+      <input type="checkbox" id="prettyPrintJson" checked>
+      <label for="prettyPrintJson">pretty print json</label>
+      <input type="checkbox" id="decodeURIComponent" checked>
+      <label for="decodeURIComponent">decode URI component</label>
+    </div>
+    <div id="drop_zone">Drop files here</div>
+    <output id="list"></output>
+    <script>
+      function handleFileSelect(evt) {
+        evt.stopPropagation();
+        evt.preventDefault();
+
+        var files = evt.dataTransfer.files;
+        // FileList object.
+
+        // files is a FileList of File objects. List some properties.
+        var output = [];
+        for (var i = 0, f; f = files[i]; i++) {
+          output.push('<li><strong>', escape(f.name), '</strong> (', f.type || 'n/a', ') - ', f.size, ' bytes, last modified: ', f.lastModifiedDate.toLocaleDateString(), '</li>');
+
+          // test read files
+          var reader = new FileReader();
+
+          // Closure to capture the file information.
+          reader.onload = (function(theFile) {
+            return function(e) {
+              var xml = e.target.result;
+              var parser = new DOMParser();
+              var dom = parser.parseFromString(xml, 'text/xml');
+              var html = makeHTML(dom);
+              document.getElementById('list').insertBefore(html, null);
+//               var div = document.createElement('div');
+//               div.innerHTML = html;
+//               document.getElementById('list').insertBefore(div, null);
+            }
+            ;
+          }
+          )(f);
+
+          reader.readAsText(f);
+        }
+        document.getElementById('list').innerHTML = '<ul>' + output.join('') + '</ul>';
+      }
+
+      function makeHTML(dom) {
+        var div = document.createElement('div');
+        var ul = document.createElement('ul');  // index
+        div.appendChild(ul);
+        var itemCount = 1;
+        Array.prototype.forEach.call(dom.getElementsByTagName('item'), function(item) {
+          var itemEl = makeItemElem(item, itemCount);
+//           div.appendChild(document.createElement('hr'));
+          itemEl.id = 'item-' + itemCount;
+          div.appendChild(itemEl);
+          var li = document.createElement('li');
+          var a = document.createElement('a');
+          a.setAttribute('href', '#' + itemEl.id);
+          a.innerText = itemEl.id + ' : '
+            + '[' + item.getElementsByTagName('time')[0].textContent + '] '
+            + item.getElementsByTagName('method')[0].textContent + ' '
+            + item.getElementsByTagName('path')[0].textContent
+          ;
+          li.appendChild(a);
+          ul.appendChild(li);
+          itemCount += 1;
+        });
+        return div;
+      }
+
+      function makeItemElem(item, itemCount) {
+        var el = document.createElement('div');
+        el.className = 'item';
+        var h2 = document.createElement('h2');
+        h2.innerText = 'Item-' + itemCount;
+        el.appendChild(h2);
+
+        var info = document.createElement('div');
+        info.className = 'info'
+//         var h3 = document.createElement('h3');
+//         h3.innerText = 'Info';
+//         info.appendChild(h3);
+        var ul = document.createElement('ul');
+        ['time', 'host', 'port', 'protocol'].forEach(function(name) {
+          var li = document.createElement('li');
+          li.innerText = name + ': ' + item.getElementsByTagName(name)[0].textContent;
+          ul.appendChild(li);
+        });
+        info.appendChild(ul);
+        el.appendChild(info);
+
+        var req = document.createElement('div');
+        req.className = 'request';
+        h3 = document.createElement('h3');
+        h3.innerText = 'Request';
+        req.appendChild(h3);
+        var pre = document.createElement('pre');
+        var code = document.createElement('code');
+        var requestText = b64ToUtf8(item.getElementsByTagName('request')[0].textContent);
+        requestText = document.querySelector('#decodeURIComponent').checked
+          ? decodeURIComponent(requestText) : requestText;
+        code.innerText = document.querySelector('#prettyPrintJson').checked
+          ? prettifyJsonPayload(requestText) : requestText;
+        pre.appendChild(code);
+        req.appendChild(pre);
+        el.appendChild(req);
+
+        var res = document.createElement('div');
+        res.className = 'response';
+        h3 = document.createElement('h3');
+        h3.innerText = 'Response';
+        res.appendChild(h3);
+        pre = document.createElement('pre');
+        code = document.createElement('code');
+        var responseText = b64ToUtf8(item.getElementsByTagName('response')[0].textContent);
+        responseText = document.querySelector('#decodeURIComponent').checked
+          ? decodeURIComponent(responseText) : responseText;
+        code.innerText = document.querySelector('#prettyPrintJson').checked
+          ? prettifyJsonPayload(responseText) : responseText;
+        pre.appendChild(code);
+        res.appendChild(pre);
+        el.appendChild(res);
+
+        return el;
+      }
+
+      function splitHeaderPayload(s) {
+          var xs = s.split(/\n\r?\n\r?/);
+          return { header: xs[0], payload: xs.slice(1).join('\n\r\n\r') };
+      }
+
+      function prettifyJsonPayload(s) {
+          var r = splitHeaderPayload(s);
+          return r.header + '\n\n' + prettifyJson(r.payload);
+      }
+
+      function prettifyJson(jsonStr) {
+        try {
+          var o = JSON.parse(jsonStr);
+          return JSON.stringify(o, null, 2);
+        } catch (e) {
+          console.warn(e);
+        }
+        return jsonStr;
+      }
+
+      function b64ToUtf8(s) {
+        return decodeURIComponent(escape(window.atob(s)));
+      }
+
+      function download(filename, text) {
+        var element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+        element.setAttribute('download', filename);
+
+        element.style.display = 'none';
+        document.body.appendChild(element);
+
+        element.click();
+
+        document.body.removeChild(element);
+      }
+
+      function handleDragOver(evt) {
+        evt.stopPropagation();
+        evt.preventDefault();
+        evt.dataTransfer.dropEffect = 'copy';
+        // Explicitly show this is a copy.
+      }
+
+      // Setup the dnd listeners.
+      var dropZone = document.getElementById('drop_zone');
+      dropZone.addEventListener('dragover', handleDragOver, false);
+      dropZone.addEventListener('drop', handleFileSelect, false);
+    </script>
+  </body>
+</html>
